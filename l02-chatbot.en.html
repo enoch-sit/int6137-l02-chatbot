@@ -34,12 +34,10 @@
     .rail summary::after { content:"▾"; color:var(--eucalyptus); font-size:11px; }
     .rail details:not([open]) summary::after { content:"▸"; }
     .drop { padding:0 10px 12px; display:flex; flex-direction:column; gap:8px; }
-    .nav-ids { font-size:11px; font-weight:500; color:var(--muted); }
     .chat { background:var(--white); border:1px solid var(--mist); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:10px; min-width:0; min-height:560px; }
     .chat h2 { margin:0; font-size:13px; font-weight:650; color:var(--eucalyptus); }
-    .var { display:grid; grid-template-columns:24px 7.2rem 1fr; gap:8px; align-items:center; font-size:12px; }
+    .var { display:grid; grid-template-columns:7.2rem 1fr; gap:8px; align-items:center; font-size:12px; }
     .var.tall { align-items:start; }
-    .badge { width:24px; height:24px; border-radius:8px; background:var(--eucalyptus); color:var(--white); font-size:11px; font-weight:650; display:grid; place-items:center; }
     .var label { font-weight:650; }
     input[type=text], input[type=password], input[type=number], textarea, select {
       width:100%; font: inherit; padding:6px 8px; border:1px solid var(--mist); border-radius:8px; background:var(--white); color:var(--ink);
@@ -100,20 +98,20 @@
           <button type="button" class="tiny" id="save-now">Save</button>
         </div>
         <details open>
-          <summary>Connect <span class="nav-ids">1 · 8 · 9 · 10 · 11</span></summary>
+          <summary>Connect</summary>
           <div class="drop">
-            <div class="var" data-l02="1"><span class="badge">1</span><label>API</label><input id="endpoint" type="text" value="https://openrouter.ai/api/v1/chat/completions" placeholder="https://openrouter.ai/api/v1/chat/completions" /></div>
-            <div class="var" data-l02="10"><span class="badge">10</span><label>Key</label><input id="apikey" type="password" placeholder="key for Bearer" /></div>
-            <div class="var" data-l02="8"><span class="badge">8</span><label>JSON</label><input id="model" type="text" value="qwen/qwen-2.5-7b-instruct" /></div>
+            <div class="var" data-l02="1"><label>API</label><input id="endpoint" type="text" value="https://openrouter.ai/api/v1/chat/completions" placeholder="https://openrouter.ai/api/v1/chat/completions" /></div>
+            <div class="var" data-l02="10"><label>Key</label><input id="apikey" type="password" placeholder="key for Bearer" /></div>
+            <div class="var" data-l02="8"><label>JSON</label><input id="model" type="text" value="qwen/qwen-2.5-7b-instruct" /></div>
             <p class="hint">Do not use <code>:free</code> models (about 20 requests per minute).</p>
-            <div class="var" data-l02="9"><span class="badge">9</span><label>stream</label><span><label><input id="stream" type="checkbox" /> <code>stream: true</code> (off by default)</label></span></div>
-            <div class="var" data-l02="11"><span class="badge">11</span><label>temperature</label><input id="temp" type="number" min="0" max="2" step="0.1" value="0.2" /></div>
+            <div class="var" data-l02="9"><label>stream</label><span><label><input id="stream" type="checkbox" /> <code>stream: true</code> (off by default)</label></span></div>
+            <div class="var" data-l02="11"><label>temperature</label><input id="temp" type="number" min="0" max="2" step="0.1" value="0.2" /></div>
           </div>
         </details>
         <details>
-          <summary>Thread <span class="nav-ids">2 · 3 · 7 · 13</span></summary>
+          <summary>Thread</summary>
           <div class="drop">
-            <div class="var tall" data-l02="2"><span class="badge">2</span><label>messages[]</label>
+            <div class="var tall" data-l02="2"><label>messages[]</label>
               <span class="fs-host" id="json-home">
                 <textarea class="pane" id="messages-json" spellcheck="false"></textarea>
                 <span class="fs-tools">
@@ -122,22 +120,22 @@
                 </span>
               </span>
             </div>
-            <div class="var tall" data-l02="3"><span class="badge">3</span><label>Three roles</label><textarea id="system" rows="2">You are a classroom TA. Keep answers short.</textarea></div>
-            <div class="var" data-l02="7"><span class="badge">7</span><label>Window</label>
+            <div class="var tall" data-l02="3"><label>Three roles</label><textarea id="system" rows="2">You are a classroom TA. Keep answers short.</textarea></div>
+            <div class="var" data-l02="7"><label>Window</label>
               <span><input id="maxTurns" type="number" min="1" max="40" value="8" style="width:4.5rem" /> turns · 
               <select id="strategy"><option value="slide">Slide</option><option value="summary">Summary placeholder</option><option value="hybrid">Hybrid placeholder</option></select></span>
             </div>
-            <div class="var" data-l02="13"><span class="badge">13</span><label>Craft</label><span class="hint">Small talk can drop; keep the latest user turn.</span></div>
+            <div class="var" data-l02="13"><label>Craft</label><span class="hint">Small talk can drop; keep the latest user turn.</span></div>
           </div>
         </details>
         <details>
-          <summary>Usage <span class="nav-ids">4 · 5 · 6 · 14 · 15</span></summary>
+          <summary>Usage</summary>
           <div class="drop">
-            <div class="var" data-l02="4"><span class="badge">4</span><label>Tokenizer</label><span class="readout" id="est">Estimate prompt ≈ 0 (not the bill)</span></div>
-            <div class="var" data-l02="5"><span class="badge">5</span><label>prompt_tokens</label><span class="readout" id="pt">—</span></div>
-            <div class="var" data-l02="6"><span class="badge">6</span><label>completion</label><span class="readout" id="ct">— / —  total already summed</span></div>
-            <div class="var" data-l02="14"><span class="badge">14</span><label>Front-end</label><span class="hint">Disable the button while sending; errors go in the red box, not an empty bubble.</span></div>
-            <div class="var" data-l02="15"><span class="badge">15</span><label>HTTP</label><span class="readout" id="httpstatus">No request yet</span></div>
+            <div class="var" data-l02="4"><label>Tokenizer</label><span class="readout" id="est">Estimate prompt ≈ 0 (not the bill)</span></div>
+            <div class="var" data-l02="5"><label>prompt_tokens</label><span class="readout" id="pt">—</span></div>
+            <div class="var" data-l02="6"><label>completion</label><span class="readout" id="ct">— / —  total already summed</span></div>
+            <div class="var" data-l02="14"><label>Front-end</label><span class="hint">Disable the button while sending; errors go in the red box, not an empty bubble.</span></div>
+            <div class="var" data-l02="15"><label>HTTP</label><span class="readout" id="httpstatus">No request yet</span></div>
             <p class="path">Path: <code>choices[0].message.content</code> · <code>usage</code></p>
           </div>
         </details>
@@ -232,7 +230,7 @@ function parseStreamChunk(sseDataLine) {
         <div class="toolbar">
           <button type="button" class="alt" id="clear">Clear chat</button>
           <button type="button" class="alt" id="export">Export messages</button>
-          <button type="button" class="alt" id="reveal" disabled>Reveal</button>
+          <button type="button" class="alt" id="reveal" hidden>Reveal</button>
         </div>
         <aside id="ctf-reveal" hidden>
           <p><strong>Canonical answer</strong> · Flag <code>FLAG{messages[]}</code></p>
@@ -252,7 +250,7 @@ function parseStreamChunk(sseDataLine) {
   <div id="json-fs" hidden>
     <div class="sheet">
       <div id="json-fs-bar">
-        <span class="ttl">2 · messages[]</span>
+        <span class="ttl">messages[]</span>
         <button type="button" id="json-fs-close">Done</button>
       </div>
       <div id="json-fs-mount"></div>
@@ -268,7 +266,7 @@ function parseStreamChunk(sseDataLine) {
     var messagesDirty = false;
     var thread = [];
     var ctfCaptured = false;
-    var ctfTried = false;
+    var teacherMode = /(?:^|[?&])teacher=1(?:&|$)/.test(String(location.search || ''));
 
     var persistReady = false;
     var saveTimer = null;
@@ -277,13 +275,7 @@ function parseStreamChunk(sseDataLine) {
     var pageEl = document.querySelector('.page');
     var shellEl = document.querySelector('.shell');
 
-    function unlockReveal() {
-      ctfTried = true;
-      $('reveal').disabled = false;
-    }
-
     function considerCapture(sent, ok) {
-      unlockReveal();
       if (ctfCaptured || !ok || !Array.isArray(sent)) return;
       var users = 0;
       var asst = 0;
@@ -617,21 +609,18 @@ function parseStreamChunk(sseDataLine) {
       showError('');
       var endpoint = $('endpoint').value.trim();
       if (!endpoint) {
-        showError('Fill 1 · API endpoint first (e.g. OpenRouter chat completions).');
+        showError('Fill the API endpoint first (e.g. OpenRouter chat completions).');
         $('httpstatus').textContent = 'Not sent';
-        unlockReveal();
         return;
       }
       var messages;
       try { messages = outgoingMessages(); }
       catch (err) {
-        showError('2 · messages[] JSON is invalid, not sent: ' + (err && err.message ? err.message : err));
+        showError('messages[] JSON is invalid, not sent: ' + (err && err.message ? err.message : err));
         $('httpstatus').textContent = 'Not sent';
-        unlockReveal();
         return;
       }
       var sentMessages = messages;
-      unlockReveal();
       var parsers;
       try { parsers = loadParsers(); }
       catch (err) {
@@ -737,7 +726,7 @@ function parseStreamChunk(sseDataLine) {
           }, null, 2);
         }
       } catch (err) {
-        showError('2 · messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
+        showError('messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
       }
     });
     ['endpoint','apikey','model','system','temp','stream','maxTurns','strategy'].forEach(function (id) {
@@ -759,10 +748,13 @@ function parseStreamChunk(sseDataLine) {
       addMsg('sys', 'Cleared this page’s messages[]. The model does not know you cleared it.');
     };
     $('reveal').onclick = function () {
-      if (!ctfTried) return;
+      if (!teacherMode) return;
       var panel = $('ctf-reveal');
       panel.hidden = !panel.hidden;
     };
+    if (teacherMode) {
+      $('reveal').hidden = false;
+    }
     $('prompt').addEventListener('keydown', function (e) {
       if (e.key !== 'Enter') return;
       if (e.isComposing || e.keyCode === 229) return;
@@ -786,7 +778,7 @@ function parseStreamChunk(sseDataLine) {
       if (messagesDirty) {
         try { thread = parseMessagesJson(); messagesDirty = false; }
         catch (err) {
-          showError('2 · messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
+          showError('messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
           return;
         }
       }
