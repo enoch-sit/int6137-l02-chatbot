@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>L02 glass-box chatbot</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --rail: 320px;
+      --cream:#fbf7f1; --ink:#1c2b22; --eucalyptus:#3d6b4f; --amber:#e8a838;
+      --mist:#e8ece9; --white:#fff; --coral:#f06449; --muted:#5a6b62;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font: 14px/1.45 system-ui,sans-serif; background:var(--cream); color:var(--ink); }
+    .page { max-width:1280px; margin:0 auto; padding:16px; display:flex; flex-direction:column; gap:12px; min-height:100vh; }
+    .kicker { margin:0; font-size:12px; font-weight:650; color:var(--eucalyptus); }
+    h1 { margin:4px 0; font-size:20px; font-weight:650; }
+    .lede { margin:0 0 6px; font-size:13px; }
+    .warn { margin:0; font-size:12px; color:var(--ink); background:rgba(232,168,56,.28); padding:8px 12px; border-radius:10px; }
+    .shell { display:grid; gap:12px; grid-template-columns:1fr; align-items:stretch; flex:1; min-height:0; }
+    .split { display:none; width:8px; padding:0; margin:0; border:0; border-radius:4px; background:var(--eucalyptus); cursor:col-resize; align-self:stretch; }
+    @media (min-width:900px) {
+      .shell { grid-template-columns: var(--rail) 8px minmax(0,1fr); gap:12px 4px; }
+      .split { display:block; }
+    }
+    .rail { background:var(--white); border:1px solid var(--mist); border-radius:12px; padding:10px; min-width:0; overflow:auto; max-height:min(80vh,880px); }
+    .rail-bar { display:flex; align-items:center; gap:8px; margin:4px 8px 10px; }
+    .rail-bar h2 { margin:0; font-size:13px; font-weight:650; color:var(--eucalyptus); flex:1; }
+    #save-status { margin:0; white-space:nowrap; }
+    .rail details { border:1px solid var(--mist); border-radius:10px; margin:0 0 8px; background:var(--cream); }
+    .rail summary { cursor:pointer; font-weight:650; font-size:13px; padding:10px 12px; display:flex; align-items:center; justify-content:space-between; gap:8px; list-style:none; }
+    .rail summary::-webkit-details-marker { display:none; }
+    .rail summary::after { content:"▾"; color:var(--eucalyptus); font-size:11px; }
+    .rail details:not([open]) summary::after { content:"▸"; }
+    .drop { padding:0 10px 12px; display:flex; flex-direction:column; gap:8px; }
+    .nav-ids { font-size:11px; font-weight:500; color:var(--muted); }
+    .chat { background:var(--white); border:1px solid var(--mist); border-radius:12px; padding:14px; display:flex; flex-direction:column; gap:10px; min-width:0; min-height:560px; }
+    .chat h2 { margin:0; font-size:13px; font-weight:650; color:var(--eucalyptus); }
+    .var { display:grid; grid-template-columns:24px 7.2rem 1fr; gap:8px; align-items:center; font-size:12px; }
+    .var.tall { align-items:start; }
+    .badge { width:24px; height:24px; border-radius:8px; background:var(--eucalyptus); color:var(--white); font-size:11px; font-weight:650; display:grid; place-items:center; }
+    .var label { font-weight:650; }
+    input[type=text], input[type=password], input[type=number], textarea, select {
+      width:100%; font: inherit; padding:6px 8px; border:1px solid var(--mist); border-radius:8px; background:var(--white); color:var(--ink);
+    }
+    textarea.pane { min-height:72px; font-family: ui-monospace, Consolas, monospace; font-size:11px; background:var(--white); }
+    #messages-json { min-height:120px; }
+    #parser { min-height:140px; font-family: ui-monospace, Consolas, monospace; font-size:11px; background:var(--white); }
+    #log { flex:1; min-height:320px; overflow:auto; border-radius:10px; padding:8px; background:var(--cream); }
+    .msg { margin:0 0 6px; padding:8px 10px; border-radius:10px; white-space:pre-wrap; font-size:13px; }
+    .user { background:rgba(61,107,79,.16); }
+    .bot { background:var(--white); border:1px solid var(--mist); }
+    .sys { background:var(--mist); color:var(--muted); }
+    .err { margin:0; background:#fbe6e3; color:var(--coral); padding:8px 10px; border-radius:8px; }
+    .toolbar, form { display:flex; gap:8px; flex-wrap:wrap; }
+    form.composer { flex-wrap:nowrap; align-items:flex-end; margin-top:auto; }
+    #prompt { flex:1; min-width:0; min-height:72px; resize:vertical; background:var(--cream); }
+    .composer-hint { margin:0; }
+    .ctf { background:var(--cream); border:1px solid var(--mist); border-radius:12px; padding:12px 14px; display:flex; flex-direction:column; gap:6px; }
+    .ctf .k { margin:0; font-size:12px; font-weight:700; color:var(--eucalyptus); }
+    .ctf .t { margin:0; font-size:13px; }
+    #ctf-status { margin:0; font-size:12px; color:var(--muted); }
+    #ctf-flag { margin:0; font-size:13px; font-weight:650; color:var(--eucalyptus); background:rgba(61,107,79,.16); padding:8px 10px; border-radius:8px; }
+    #ctf-reveal { background:var(--cream); border:1px solid var(--mist); border-radius:10px; padding:10px 12px; font-size:12px; }
+    #ctf-reveal pre { margin:8px 0 0; white-space:pre-wrap; font-family:ui-monospace,Consolas,monospace; font-size:11px; }
+    #chat { margin-top:auto; }
+    button { padding:10px 14px; border:0; border-radius:8px; background:var(--eucalyptus); color:var(--white); font:inherit; font-weight:650; cursor:pointer; }
+    button.alt { background:var(--mist); color:var(--ink); }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .readout { font-variant-numeric: tabular-nums; }
+    .hint { font-size:11px; color:var(--muted); margin:0; }
+    .path { font-family: ui-monospace, Consolas, monospace; font-size:11px; background:var(--white); padding:6px 8px; border-radius:8px; }
+    .pane-label { font-size:11px; font-weight:650; margin:0; }
+    .fs-host { display:flex; flex-direction:column; gap:6px; min-width:0; }
+    .fs-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    button.tiny { padding:6px 10px; font-size:12px; }
+    #json-fs { position:fixed; inset:0; z-index:40; background:rgba(28,43,34,.45); display:none; padding:32px 48px; }
+    #json-fs.open { display:flex; flex-direction:column; }
+    #json-fs .sheet { flex:1; min-height:0; background:var(--white); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:12px; }
+    #json-fs-bar { display:flex; align-items:center; gap:8px; }
+    #json-fs-bar .ttl { font-weight:700; color:var(--eucalyptus); flex:1; }
+    #json-fs-mount { flex:1; min-height:0; display:flex; }
+    #json-fs.open #messages-json { flex:1; min-height:0; height:auto; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <p class="kicker">INT6137 · L02 glass box</p>
+      <h1>Conversational LLM and context engineering</h1>
+      <p class="lede">The API has no memory. <code>messages[]</code> is the conversation. Send a JSON array, not the bubbles.</p>
+      <p class="warn">Keys are stored with this HTML on the classroom server and teachers can see them. Do not paste production keys. Teachers mint capped student keys in VibeKoala Keys, then paste one CSV line here. HTTP uses the browser <code>fetch</code>, not platform billing.</p>
+    </header>
+    <div class="shell">
+      <nav class="rail" aria-label="Settings">
+        <div class="rail-bar">
+          <h2>Settings</h2>
+          <p class="hint" id="save-status">Live save</p>
+          <button type="button" class="tiny" id="save-now">Save</button>
+        </div>
+        <details open>
+          <summary>Connect <span class="nav-ids">1 · 8 · 9 · 10 · 11</span></summary>
+          <div class="drop">
+            <div class="var" data-l02="1"><span class="badge">1</span><label>API</label><input id="endpoint" type="text" value="https://openrouter.ai/api/v1/chat/completions" placeholder="https://openrouter.ai/api/v1/chat/completions" /></div>
+            <div class="var" data-l02="10"><span class="badge">10</span><label>Key</label><input id="apikey" type="password" placeholder="key for Bearer" /></div>
+            <div class="var" data-l02="8"><span class="badge">8</span><label>JSON</label><input id="model" type="text" value="qwen/qwen-2.5-7b-instruct" /></div>
+            <p class="hint">Do not use <code>:free</code> models (about 20 requests per minute).</p>
+            <div class="var" data-l02="9"><span class="badge">9</span><label>stream</label><span><label><input id="stream" type="checkbox" /> <code>stream: true</code> (off by default)</label></span></div>
+            <div class="var" data-l02="11"><span class="badge">11</span><label>temperature</label><input id="temp" type="number" min="0" max="2" step="0.1" value="0.2" /></div>
+          </div>
+        </details>
+        <details>
+          <summary>Thread <span class="nav-ids">2 · 3 · 7 · 13</span></summary>
+          <div class="drop">
+            <div class="var tall" data-l02="2"><span class="badge">2</span><label>messages[]</label>
+              <span class="fs-host" id="json-home">
+                <textarea class="pane" id="messages-json" spellcheck="false"></textarea>
+                <span class="fs-tools">
+                  <span class="hint" id="msgcount">0 items. Send this JSON, not the bubbles above.</span>
+                  <button type="button" class="alt tiny" id="json-fs-open">Full screen</button>
+                </span>
+              </span>
+            </div>
+            <div class="var tall" data-l02="3"><span class="badge">3</span><label>Three roles</label><textarea id="system" rows="2">You are a classroom TA. Keep answers short.</textarea></div>
+            <div class="var" data-l02="7"><span class="badge">7</span><label>Window</label>
+              <span><input id="maxTurns" type="number" min="1" max="40" value="8" style="width:4.5rem" /> turns · 
+              <select id="strategy"><option value="slide">Slide</option><option value="summary">Summary placeholder</option><option value="hybrid">Hybrid placeholder</option></select></span>
+            </div>
+            <div class="var" data-l02="13"><span class="badge">13</span><label>Craft</label><span class="hint">Small talk can drop; keep the latest user turn.</span></div>
+          </div>
+        </details>
+        <details>
+          <summary>Usage <span class="nav-ids">4 · 5 · 6 · 14 · 15</span></summary>
+          <div class="drop">
+            <div class="var" data-l02="4"><span class="badge">4</span><label>Tokenizer</label><span class="readout" id="est">Estimate prompt ≈ 0 (not the bill)</span></div>
+            <div class="var" data-l02="5"><span class="badge">5</span><label>prompt_tokens</label><span class="readout" id="pt">—</span></div>
+            <div class="var" data-l02="6"><span class="badge">6</span><label>completion</label><span class="readout" id="ct">— / —  total already summed</span></div>
+            <div class="var" data-l02="14"><span class="badge">14</span><label>Front-end</label><span class="hint">Disable the button while sending; errors go in the red box, not an empty bubble.</span></div>
+            <div class="var" data-l02="15"><span class="badge">15</span><label>HTTP</label><span class="readout" id="httpstatus">No request yet</span></div>
+            <p class="path">Path: <code>choices[0].message.content</code> · <code>usage</code></p>
+          </div>
+        </details>
+        <details>
+          <summary>HTTP envelope</summary>
+          <div class="drop">
+            <p class="hint">All four panes are editable. Send uses request headers + body; browsers often hide some response headers.</p>
+            <p class="pane-label">Request headers</p>
+            <textarea class="pane" id="req-headers">Content-Type: application/json</textarea>
+            <div class="toolbar">
+              <button type="button" class="alt" id="reset-body">Reset body from knobs</button>
+              <button type="button" class="alt" id="reset-headers">Reset headers from key</button>
+            </div>
+            <p class="pane-label">Request body</p>
+            <textarea class="pane" id="req-body"></textarea>
+            <p class="pane-label">Response headers</p>
+            <textarea class="pane" id="res-headers" placeholder="Filled after send; you can edit then Re-parse"></textarea>
+            <p class="pane-label">Response body</p>
+            <textarea class="pane" id="res-body" placeholder="Raw response. Streaming is SSE lines."></textarea>
+            <div class="toolbar">
+              <button type="button" id="reparse">Re-parse</button>
+            </div>
+            <p class="pane-label">Parser</p>
+            <p class="hint">There will be a separate homework. This ships a working <code>parseResponse</code> / <code>parseStreamChunk</code> that you can edit.</p>
+            <textarea id="parser">function parseResponse(rawText, httpStatus) {
+  var status = Number(httpStatus);
+  if (!rawText) return { error: 'Empty response body' };
+  var trimmed = String(rawText).trim();
+  if (/^data:\s*/m.test(trimmed)) {
+    return { error: 'This is a stream. Use parseStreamChunk to stitch delta.content, or turn stream off.' };
+  }
+  var data;
+  try { data = JSON.parse(trimmed); }
+  catch (err) {
+    return { error: 'JSON.parse failed: ' + (err && err.message ? err.message : err) };
+  }
+  if (data && data.error) {
+    var msg = data.error.message || JSON.stringify(data.error);
+    return { error: 'HTTP ' + status + ': ' + msg };
+  }
+  if (!(status >= 200 && status < 300)) {
+    return { error: 'HTTP ' + status + ': ' + trimmed.slice(0, 240) };
+  }
+  var choice = data.choices && data.choices[0];
+  var content = choice && choice.message ? choice.message.content : (data.output_text || data.message || '');
+  var usage = data.usage || {};
+  return {
+    content: content == null ? '' : String(content),
+    usage: {
+      prompt_tokens: usage.prompt_tokens,
+      completion_tokens: usage.completion_tokens,
+      total_tokens: usage.total_tokens
+    }
+  };
+}
+
+function parseStreamChunk(sseDataLine) {
+  var line = String(sseDataLine || '').trim();
+  if (line === '[DONE]') return { done: true };
+  if (!line) return {};
+  var data;
+  try { data = JSON.parse(line); }
+  catch (err) {
+    return { error: 'chunk JSON.parse failed ([DONE] is not JSON)' };
+  }
+  var delta = data.choices && data.choices[0] && data.choices[0].delta
+    ? data.choices[0].delta.content
+    : '';
+  return { delta: delta || '' };
+}
+</textarea>
+          </div>
+        </details>
+      </nav>
+      <button type="button" class="split" id="split" aria-label="Resize sidebar"></button>
+      <section class="chat">
+        <h2>Chat</h2>
+        <div class="ctf" data-ctf="1">
+          <p class="k">Level 1 · flag only on round two</p>
+          <p class="t">Task: send a secret, wait for a reply, then ask “What did I just say?”. Clearing drops the array.</p>
+          <p id="ctf-status">One more round needed. The second successful request must already include the previous turn.</p>
+          <p id="ctf-flag" hidden>Flag captured FLAG{messages[]}</p>
+        </div>
+        <p class="hint" data-l02="12">Bubbles still showing ≠ the model remembers. Memory lives in this page’s <code>messages[]</code>.</p>
+        <div id="log"></div>
+        <p id="error" class="err" hidden></p>
+        <form id="chat" class="composer">
+          <textarea id="prompt" rows="2" autocomplete="off" placeholder="Say something…"></textarea>
+          <button type="submit" id="send">Send</button>
+        </form>
+        <p class="hint composer-hint">Enter sends · Shift+Enter newline</p>
+        <div class="toolbar">
+          <button type="button" class="alt" id="clear">Clear chat</button>
+          <button type="button" class="alt" id="export">Export messages</button>
+          <button type="button" class="alt" id="reveal" disabled>Reveal</button>
+        </div>
+        <aside id="ctf-reveal" hidden>
+          <p><strong>Canonical answer</strong> · Flag <code>FLAG{messages[]}</code></p>
+          <p>The second POST body must already contain the first-round user and assistant. The flag is in the request body, not in the model’s head.</p>
+          <pre>{
+  "messages": [
+    { "role": "system", "content": "…" },
+    { "role": "user", "content": "(secret)" },
+    { "role": "assistant", "content": "(first reply)" },
+    { "role": "user", "content": "What did I just say?" }
+  ]
+}</pre>
+        </aside>
+      </section>
+    </div>
+  </div>
+  <div id="json-fs" hidden>
+    <div class="sheet">
+      <div id="json-fs-bar">
+        <span class="ttl">2 · messages[]</span>
+        <button type="button" id="json-fs-close">Done</button>
+      </div>
+      <div id="json-fs-mount"></div>
+      <p class="hint">Enter inserts a newline · Esc or Done closes. Send still uses the chat box below.</p>
+    </div>
+  </div>
+  <script>
+    function $(id) { return document.getElementById(id); }
+    var logEl = $('log');
+    var errorEl = $('error');
+    var bodyDirty = false;
+    var headerDirty = false;
+    var messagesDirty = false;
+    var thread = [];
+    var ctfCaptured = false;
+    var ctfTried = false;
+
+    var persistReady = false;
+    var saveTimer = null;
+    var SAVE_KEY = 'l02-vars';
+    var SAVE_IDS = ['endpoint', 'apikey', 'model', 'temp', 'system', 'maxTurns', 'strategy', 'messages-json'];
+    var pageEl = document.querySelector('.page');
+    var shellEl = document.querySelector('.shell');
+
+    function unlockReveal() {
+      ctfTried = true;
+      $('reveal').disabled = false;
+    }
+
+    function considerCapture(sent, ok) {
+      unlockReveal();
+      if (ctfCaptured || !ok || !Array.isArray(sent)) return;
+      var users = 0;
+      var asst = 0;
+      for (var i = 0; i < sent.length; i++) {
+        if (sent[i].role === 'user') users++;
+        if (sent[i].role === 'assistant') asst++;
+      }
+      if (users >= 2 && asst >= 1) {
+        ctfCaptured = true;
+        $('ctf-flag').hidden = false;
+        $('ctf-status').textContent = 'The second-round request body already has history.';
+      }
+    }
+
+    function resetCtfProgress() {
+      ctfCaptured = false;
+      $('ctf-flag').hidden = true;
+      $('ctf-status').textContent = 'One more round needed. Clearing drops the array.';
+    }
+
+    function showError(text) {
+      if (!text) { errorEl.hidden = true; errorEl.textContent = ''; return; }
+      errorEl.hidden = false;
+      errorEl.textContent = text;
+    }
+
+    function setSaveStatus(text) {
+      var el = $('save-status');
+      if (el) el.textContent = text;
+    }
+
+    function unwrapStore(raw) {
+      if (raw == null) return null;
+      if (typeof raw === 'string') return raw;
+      if (typeof raw === 'object' && typeof raw.value === 'string') return raw.value;
+      return null;
+    }
+
+    function localGet(key) {
+      try { return localStorage.getItem(key); } catch (err) { return null; }
+    }
+
+    function localSet(key, value) {
+      try { localStorage.setItem(key, value); } catch (err) { /* ignore */ }
+    }
+
+    function storeGet(key) {
+      if (window.VK && window.VK.storage) {
+        return window.VK.storage.getItem(key).then(function (raw) {
+          var v = unwrapStore(raw);
+          return v != null ? v : localGet(key);
+        }).catch(function () { return localGet(key); });
+      }
+      return Promise.resolve(localGet(key));
+    }
+
+    function storeSet(key, value) {
+      localSet(key, value);
+      if (window.VK && window.VK.storage) {
+        return window.VK.storage.setItem(key, value);
+      }
+      return Promise.resolve();
+    }
+
+    function snapshotVars() {
+      var rail = pageEl && pageEl.style.getPropertyValue('--rail');
+      return {
+        endpoint: $('endpoint').value,
+        apikey: $('apikey').value,
+        model: $('model').value,
+        stream: $('stream').checked,
+        temp: $('temp').value,
+        system: $('system').value,
+        maxTurns: $('maxTurns').value,
+        strategy: $('strategy').value,
+        messages: $('messages-json').value,
+        rail: rail || '320px'
+      };
+    }
+
+    function applySnapshot(data) {
+      if (!data || typeof data !== 'object') return false;
+      SAVE_IDS.forEach(function (id) {
+        var key = id === 'messages-json' ? 'messages' : id;
+        if (typeof data[key] === 'string' && $(id)) $(id).value = data[key];
+      });
+      if (typeof data.stream === 'boolean') $('stream').checked = data.stream;
+      if (data.rail) applyRail(parseInt(data.rail, 10));
+      return true;
+    }
+
+    function applyHostOpenRouterKey() {
+      var key = window.__VK_OPENROUTER_KEY;
+      if (typeof key !== 'string' || !key) return;
+      var el = $('apikey');
+      if (el && !String(el.value || '').trim()) el.value = key;
+      syncHeaders();
+    }
+
+    function scheduleSave() {
+      if (!persistReady) return;
+      setSaveStatus('Saving…');
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(function () { flushSave(); }, 400);
+    }
+
+    function flushSave() {
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      var json = JSON.stringify(snapshotVars());
+      setSaveStatus('Saving…');
+      return storeSet(SAVE_KEY, json).then(function () {
+        setSaveStatus('Saved');
+      }).catch(function () {
+        setSaveStatus('Unsaved');
+      });
+    }
+
+    function replayThread() {
+      logEl.innerHTML = '';
+      var hasTurns = false;
+      thread.forEach(function (m) {
+        if (m.role === 'user') { addMsg('user', m.content); hasTurns = true; }
+        else if (m.role === 'assistant') { addMsg('bot', m.content); hasTurns = true; }
+      });
+      if (!hasTurns) {
+        addMsg('sys', 'Fill the endpoint and key, then say something. After send, read the raw response; the parser is prefilled — homework comes later.');
+      }
+    }
+
+    function addMsg(cls, text) {
+      var el = document.createElement('div');
+      el.className = 'msg ' + cls;
+      el.textContent = text;
+      logEl.appendChild(el);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function systemText() { return $('system').value; }
+
+    function rebuildHistorySystem() {
+      var rest = thread.filter(function (m) { return m.role !== 'system'; });
+      thread = [{ role: 'system', content: systemText() }].concat(rest);
+    }
+
+    function windowed(list) {
+      var maxTurns = Math.max(1, Number($('maxTurns').value) || 8);
+      var keep = maxTurns * 2;
+      var system = list.filter(function (m) { return m.role === 'system'; });
+      var rest = list.filter(function (m) { return m.role !== 'system'; });
+      if (rest.length <= keep) return system.concat(rest);
+      var recent = rest.slice(-keep);
+      var dropped = rest.slice(0, rest.length - keep);
+      var strategy = $('strategy').value;
+      if (strategy === 'slide') return system.concat(recent);
+      var blob = dropped.map(function (m) {
+        return m.role + ': ' + String(m.content).slice(0, 40);
+      }).join(' | ').slice(0, 400);
+      var summary = { role: 'system', content: '[summary placeholder] earlier turns: ' + blob };
+      return system.concat([summary], recent);
+    }
+
+    function estimateTokens(messages) {
+      var s = JSON.stringify(messages);
+      var cjk = (s.match(/[\u4e00-\u9fff]/g) || []).length;
+      return Math.ceil((s.length - cjk) / 4 + cjk / 1.5);
+    }
+
+    function refreshReadouts(messages) {
+      $('msgcount').textContent = messages.length + '  items. Send this JSON, not the bubbles above.';
+      $('est').textContent = 'Estimate prompt ≈ ' + estimateTokens(messages) + ' (not the bill)';
+    }
+
+    function parseMessagesJson() {
+      var data = JSON.parse($('messages-json').value);
+      if (!Array.isArray(data)) throw new Error('Must be an array');
+      return data;
+    }
+
+    function outgoingMessages() {
+      if (messagesDirty) return parseMessagesJson();
+      rebuildHistorySystem();
+      return windowed(thread);
+    }
+
+    function syncBody() {
+      var messages;
+      try { messages = outgoingMessages(); }
+      catch (err) { return; }
+      if (!messagesDirty) $('messages-json').value = JSON.stringify(messages, null, 2);
+      if (!bodyDirty) {
+        $('req-body').value = JSON.stringify({
+          model: $('model').value.trim() || 'qwen/qwen-2.5-7b-instruct',
+          messages: messages,
+          stream: $('stream').checked,
+          temperature: Number($('temp').value)
+        }, null, 2);
+      }
+      refreshReadouts(messages);
+      scheduleSave();
+    }
+
+    function syncHeaders() {
+      if (headerDirty) return;
+      var lines = ['Content-Type: application/json'];
+      var key = $('apikey').value.trim();
+      if (key) lines.push('Authorization: Bearer ' + key);
+      $('req-headers').value = lines.join('\n');
+    }
+
+    function parseHeaderBlock(text) {
+      var headers = {};
+      String(text || '').split(/\r?\n/).forEach(function (line) {
+        var idx = line.indexOf(':');
+        if (idx < 1) return;
+        var k = line.slice(0, idx).trim();
+        var v = line.slice(idx + 1).trim();
+        if (k) headers[k] = v;
+      });
+      return headers;
+    }
+
+    function ensureFetchAuth(headers) {
+      var key = $('apikey').value.trim();
+      if (!key) return headers;
+      var names = Object.keys(headers);
+      for (var i = 0; i < names.length; i++) {
+        if (names[i].toLowerCase() === 'authorization' && String(headers[names[i]] || '').trim()) {
+          return headers;
+        }
+      }
+      headers.Authorization = 'Bearer ' + key;
+      return headers;
+    }
+
+    function dumpResponseHeaders(res) {
+      var lines = ['HTTP ' + res.status + ' ' + (res.statusText || '')];
+      lines.push('# The browser may hide some response headers (CORS)');
+      try {
+        res.headers.forEach(function (v, k) { lines.push(k + ': ' + v); });
+      } catch (e) { /* ignore */ }
+      return lines.join('\n');
+    }
+
+    function loadParsers() {
+      var src = $('parser').value;
+      var fn = new Function(src + '\n; return { parseResponse: parseResponse, parseStreamChunk: (typeof parseStreamChunk === "function" ? parseStreamChunk : null) };');
+      return fn();
+    }
+
+    function applyParsed(parsed, status) {
+      $('httpstatus').textContent = 'HTTP ' + status;
+      if (!parsed) { showError('Parser did not return an object'); return; }
+      if (parsed.error) { showError(parsed.error); return; }
+      showError('');
+      var content = parsed.content || '';
+      if (content) {
+        thread.push({ role: 'assistant', content: content });
+        addMsg('bot', content);
+        bodyDirty = false;
+        messagesDirty = false;
+        syncBody();
+      }
+      var u = parsed.usage || {};
+      $('pt').textContent = u.prompt_tokens == null ? '—' : String(u.prompt_tokens);
+      var ct = u.completion_tokens == null ? '—' : String(u.completion_tokens);
+      var tot = u.total_tokens == null ? '—' : String(u.total_tokens);
+      $('ct').textContent = ct + ' / ' + tot + '  total already summed, do not add again';
+    }
+
+    function applyStreamParsed(acc, parsed, status) {
+      $('httpstatus').textContent = 'HTTP ' + status + ' stream';
+      if (parsed && parsed.error) { showError(parsed.error); return acc; }
+      if (parsed && parsed.delta) {
+        acc += parsed.delta;
+        var last = logEl.querySelector('.bot:last-child');
+        if (!last) { addMsg('bot', acc); }
+        else last.textContent = acc;
+      }
+      return acc;
+    }
+
+    async function consumeStream(res, parsers) {
+      var reader = res.body && res.body.getReader ? res.body.getReader() : null;
+      if (!reader) {
+        var t = await res.text();
+        $('res-body').value = t;
+        return t;
+      }
+      var decoder = new TextDecoder();
+      var buf = '';
+      var raw = '';
+      var acc = '';
+      var parseChunk = parsers.parseStreamChunk;
+      while (true) {
+        var step = await reader.read();
+        if (step.done) break;
+        var piece = decoder.decode(step.value, { stream: true });
+        raw += piece;
+        $('res-body').value = raw;
+        buf += piece;
+        var parts = buf.split('\n');
+        buf = parts.pop() || '';
+        for (var i = 0; i < parts.length; i++) {
+          var line = parts[i];
+          if (line.indexOf('data:') !== 0) continue;
+          var data = line.slice(5).trim();
+          if (!parseChunk) continue;
+          var parsed = parseChunk(data);
+          if (parsed && parsed.done) {
+            if (acc) {
+              thread.push({ role: 'assistant', content: acc });
+              bodyDirty = false;
+              messagesDirty = false;
+              syncBody();
+            }
+            return raw;
+          }
+          acc = applyStreamParsed(acc, parsed, res.status);
+        }
+      }
+      if (acc) {
+        thread.push({ role: 'assistant', content: acc });
+        bodyDirty = false;
+        messagesDirty = false;
+        syncBody();
+      }
+      return raw;
+    }
+
+    async function sendNow() {
+      showError('');
+      var endpoint = $('endpoint').value.trim();
+      if (!endpoint) {
+        showError('Fill 1 · API endpoint first (e.g. OpenRouter chat completions).');
+        $('httpstatus').textContent = 'Not sent';
+        unlockReveal();
+        return;
+      }
+      var messages;
+      try { messages = outgoingMessages(); }
+      catch (err) {
+        showError('2 · messages[] JSON is invalid, not sent: ' + (err && err.message ? err.message : err));
+        $('httpstatus').textContent = 'Not sent';
+        unlockReveal();
+        return;
+      }
+      var sentMessages = messages;
+      unlockReveal();
+      var parsers;
+      try { parsers = loadParsers(); }
+      catch (err) {
+        showError('Parser failed to load: ' + (err && err.message ? err.message : err));
+        return;
+      }
+      if (!parsers.parseResponse) {
+        showError('Parser needs function parseResponse(rawText, httpStatus)');
+        return;
+      }
+      var headers = ensureFetchAuth(parseHeaderBlock($('req-headers').value));
+      var bodyText = $('req-body').value;
+      try {
+        var bodyObj = JSON.parse(bodyText);
+        bodyObj.messages = messages;
+        bodyText = JSON.stringify(bodyObj);
+        $('req-body').value = JSON.stringify(bodyObj, null, 2);
+      } catch (e) {
+        bodyText = JSON.stringify({
+          model: $('model').value.trim() || 'qwen/qwen-2.5-7b-instruct',
+          messages: messages,
+          stream: $('stream').checked,
+          temperature: Number($('temp').value)
+        });
+        $('req-body').value = JSON.stringify(JSON.parse(bodyText), null, 2);
+      }
+      var sendBtn = $('send');
+      sendBtn.disabled = true;
+      try {
+        var res = await fetch(endpoint, { method: 'POST', headers: headers, body: bodyText });
+        $('res-headers').value = dumpResponseHeaders(res);
+        $('httpstatus').textContent = 'HTTP ' + res.status;
+        var wantStream = false;
+        try { wantStream = !!(JSON.parse(bodyText).stream); } catch (e) { wantStream = $('stream').checked; }
+        if (wantStream) {
+          await consumeStream(res, parsers);
+          considerCapture(sentMessages, res.ok);
+          return;
+        }
+        var raw = await res.text();
+        $('res-body').value = raw;
+        var parsed = parsers.parseResponse(raw, res.status);
+        applyParsed(parsed, res.status);
+        considerCapture(sentMessages, res.status >= 200 && res.status < 300 && parsed && !parsed.error);
+      } catch (err) {
+        var msg = String(err && err.message ? err.message : err);
+        if (/Failed to fetch|NetworkError|CORS/i.test(msg)) {
+          msg = 'Network/CORS failed: ' + msg + '. The endpoint must allow browser CORS, or use the course proxy.';
+        }
+        showError(msg);
+        $('httpstatus').textContent = 'Request failed';
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    function reparseOnly() {
+      showError('');
+      var parsers;
+      try { parsers = loadParsers(); }
+      catch (err) {
+        showError('Parser failed to load: ' + (err && err.message ? err.message : err));
+        return;
+      }
+      var statusLine = ($('res-headers').value.split('\n')[0] || '');
+      var m = /HTTP\s+(\d+)/.exec(statusLine);
+      var status = m ? Number(m[1]) : 200;
+      var raw = $('res-body').value;
+      if (!parsers.parseResponse) {
+        showError('Need parseResponse');
+        return;
+      }
+      var parsed = parsers.parseResponse(raw, status);
+      if (parsed && parsed.error) { showError(parsed.error); $('httpstatus').textContent = 'HTTP ' + status; return; }
+      showError('');
+      $('httpstatus').textContent = 'HTTP ' + status + '(re-parse) ';
+      var u = parsed && parsed.usage ? parsed.usage : {};
+      $('pt').textContent = u.prompt_tokens == null ? '—' : String(u.prompt_tokens);
+      var ct = u.completion_tokens == null ? '—' : String(u.completion_tokens);
+      var tot = u.total_tokens == null ? '—' : String(u.total_tokens);
+      $('ct').textContent = ct + ' / ' + tot + '  total already summed, do not add again';
+      if (parsed && parsed.content) {
+        addMsg('bot', '(re-parse) ' + parsed.content);
+      }
+    }
+
+    $('req-body').addEventListener('input', function () { bodyDirty = true; });
+    $('req-headers').addEventListener('input', function () { headerDirty = true; });
+    $('messages-json').addEventListener('input', function () {
+      messagesDirty = true;
+      try {
+        var arr = parseMessagesJson();
+        thread = arr;
+        showError('');
+        refreshReadouts(arr);
+        scheduleSave();
+        if (!bodyDirty) {
+          $('req-body').value = JSON.stringify({
+            model: $('model').value.trim() || 'qwen/qwen-2.5-7b-instruct',
+            messages: arr,
+            stream: $('stream').checked,
+            temperature: Number($('temp').value)
+          }, null, 2);
+        }
+      } catch (err) {
+        showError('2 · messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
+      }
+    });
+    ['endpoint','apikey','model','system','temp','stream','maxTurns','strategy'].forEach(function (id) {
+      $('' + id).addEventListener('change', function () { syncHeaders(); syncBody(); });
+      $('' + id).addEventListener('input', function () { syncHeaders(); syncBody(); });
+    });
+    $('reset-body').onclick = function () { bodyDirty = false; messagesDirty = false; syncBody(); };
+    $('reset-headers').onclick = function () { headerDirty = false; syncHeaders(); };
+    $('reparse').onclick = reparseOnly;
+    $('clear').onclick = function () {
+      thread = [];
+      rebuildHistorySystem();
+      logEl.innerHTML = '';
+      showError('');
+      bodyDirty = false;
+      messagesDirty = false;
+      resetCtfProgress();
+      syncBody();
+      addMsg('sys', 'Cleared this page’s messages[]. The model does not know you cleared it.');
+    };
+    $('reveal').onclick = function () {
+      if (!ctfTried) return;
+      var panel = $('ctf-reveal');
+      panel.hidden = !panel.hidden;
+    };
+    $('prompt').addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.shiftKey) return;
+      e.preventDefault();
+      $('chat').requestSubmit();
+    });
+    $('export').onclick = function () {
+      var blob = new Blob([JSON.stringify(thread, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'messages.json';
+      a.click();
+    };
+
+    $('chat').addEventListener('submit', function (event) {
+      event.preventDefault();
+      var text = $('prompt').value.trim();
+      if (!text) return;
+      $('prompt').value = '';
+      if (messagesDirty) {
+        try { thread = parseMessagesJson(); messagesDirty = false; }
+        catch (err) {
+          showError('2 · messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
+          return;
+        }
+      }
+      rebuildHistorySystem();
+      thread.push({ role: 'user', content: text });
+      addMsg('user', text);
+      bodyDirty = false;
+      messagesDirty = false;
+      syncBody();
+      sendNow();
+    });
+
+    var jsonHome = $('json-home');
+    var jsonFs = $('json-fs');
+    var jsonMount = $('json-fs-mount');
+    function jsonFsOpen() {
+      var box = $('messages-json');
+      var sel = { start: box.selectionStart, end: box.selectionEnd };
+      jsonMount.appendChild(box);
+      jsonFs.hidden = false;
+      jsonFs.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      box.focus();
+      box.selectionStart = sel.start;
+      box.selectionEnd = sel.end;
+    }
+    function jsonFsClose() {
+      if (!jsonFs.classList.contains('open')) return;
+      var box = $('messages-json');
+      var sel = { start: box.selectionStart, end: box.selectionEnd };
+      jsonHome.insertBefore(box, jsonHome.firstChild);
+      jsonFs.classList.remove('open');
+      jsonFs.hidden = true;
+      document.body.style.overflow = '';
+      box.selectionStart = sel.start;
+      box.selectionEnd = sel.end;
+    }
+    $('json-fs-open').onclick = jsonFsOpen;
+    $('json-fs-close').onclick = jsonFsClose;
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (!jsonFs.classList.contains('open')) return;
+      e.preventDefault();
+      jsonFsClose();
+    });
+
+    var RAIL_MIN = 220;
+    var RAIL_MAX = 520;
+    var RAIL_KEY = 'l02-rail-px';
+    function applyRail(px) {
+      var n = Math.max(RAIL_MIN, Math.min(RAIL_MAX, Number(px) || 320));
+      pageEl.style.setProperty('--rail', n + 'px');
+      try { localStorage.setItem(RAIL_KEY, String(n)); } catch (err) { /* ignore */ }
+      scheduleSave();
+    }
+    try {
+      var savedRail = Number(localStorage.getItem(RAIL_KEY));
+      if (savedRail) applyRail(savedRail);
+    } catch (err) { /* ignore */ }
+    var railDrag = false;
+    $('split').addEventListener('pointerdown', function (e) {
+      railDrag = true;
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* jsdom */ }
+    });
+    $('split').addEventListener('pointermove', function (e) {
+      if (!railDrag) return;
+      applyRail(e.clientX - shellEl.getBoundingClientRect().left);
+    });
+    $('split').addEventListener('pointerup', function () { railDrag = false; });
+    $('split').addEventListener('pointercancel', function () { railDrag = false; });
+
+    function bootDefaults() {
+      rebuildHistorySystem();
+      syncHeaders();
+      syncBody();
+      addMsg('sys', 'Fill the endpoint and key, then say something. After send, read the raw response; the parser is prefilled — homework comes later.');
+    }
+
+    $('save-now').onclick = function () {
+      persistReady = true;
+      flushSave();
+    };
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') flushSave();
+    });
+
+    bootDefaults();
+    storeGet(SAVE_KEY).then(function (raw) {
+      var data = null;
+      try { data = raw ? JSON.parse(raw) : null; } catch (err) { data = null; }
+      if (data && applySnapshot(data)) {
+        try {
+          thread = parseMessagesJson();
+          messagesDirty = true;
+        } catch (err) {
+          thread = [];
+          messagesDirty = false;
+        }
+        rebuildHistorySystem();
+        messagesDirty = false;
+        headerDirty = false;
+        bodyDirty = false;
+        syncHeaders();
+        syncBody();
+        replayThread();
+        setSaveStatus('Saved');
+      }
+      applyHostOpenRouterKey();
+      persistReady = true;
+    }).catch(function () {
+      applyHostOpenRouterKey();
+      persistReady = true;
+    });
+  </script>
+</body>
+</html>

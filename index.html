@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>INT6137 L02 glass-box chatbot</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --cream:#fbf7f1; --ink:#1c2b22; --eucalyptus:#3d6b4f; --mist:#e8ece9; --white:#fff;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font: 16px/1.5 system-ui,sans-serif; background:var(--cream); color:var(--ink); }
+    main { max-width: 40rem; margin: 12vh auto; padding: 24px; }
+    p.kicker { margin:0; font-size:12px; font-weight:650; color:var(--eucalyptus); }
+    h1 { margin:8px 0 12px; font-size:28px; font-weight:650; }
+    .lede { margin:0 0 24px; color:#5a6b62; }
+    .cards { display:grid; gap:12px; }
+    a.card {
+      display:block; background:var(--white); border:1px solid var(--mist);
+      border-radius:12px; padding:16px 18px; color:var(--ink); text-decoration:none;
+    }
+    a.card:hover { border-color:var(--eucalyptus); }
+    a.card strong { display:block; color:var(--eucalyptus); font-size:15px; }
+    a.card span { font-size:13px; color:#5a6b62; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="kicker">INT6137 · L02</p>
+    <h1>Glass-box chatbot</h1>
+    <p class="lede">The API has no memory. <code>messages[]</code> is the conversation. Bring your own endpoint and key.</p>
+    <div class="cards">
+      <a class="card" href="l02-chatbot.html">
+        <strong>中文</strong>
+        <span>l02-chatbot.html · 简体中文课堂页</span>
+      </a>
+      <a class="card" href="l02-chatbot.en.html">
+        <strong>English</strong>
+        <span>l02-chatbot.en.html · English classroom page</span>
+      </a>
+    </div>
+  </main>
+</body>
+</html>
