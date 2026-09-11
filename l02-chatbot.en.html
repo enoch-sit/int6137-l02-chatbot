@@ -50,6 +50,8 @@
     .user { background:rgba(61,107,79,.16); }
     .bot { background:var(--white); border:1px solid var(--mist); }
     .sys { background:var(--mist); color:var(--muted); }
+    .msg.user, .msg.bot { cursor:text; }
+    .msg[contenteditable]:focus { outline:2px solid var(--eucalyptus); }
     .err { margin:0; background:#fbe6e3; color:var(--coral); padding:8px 10px; border-radius:8px; }
     .toolbar, form { display:flex; gap:8px; flex-wrap:wrap; }
     form.composer { flex-wrap:nowrap; align-items:flex-end; margin-top:auto; }
@@ -115,7 +117,7 @@
               <span class="fs-host" id="json-home">
                 <textarea class="pane" id="messages-json" spellcheck="false"></textarea>
                 <span class="fs-tools">
-                  <span class="hint" id="msgcount">0 items. Send this JSON, not the bubbles above.</span>
+                  <span class="hint" id="msgcount">0 items. Same array as the bubbles. Send this JSON.</span>
                   <button type="button" class="alt tiny" id="json-fs-open">Full screen</button>
                 </span>
               </span>
@@ -219,7 +221,7 @@ function parseStreamChunk(sseDataLine) {
           <p id="ctf-status">One more round needed. The second successful request must already include the previous turn.</p>
           <p id="ctf-flag" hidden>Flag captured FLAG{messages[]}</p>
         </div>
-        <p class="hint" data-l02="12">Bubbles still showing ≠ the model remembers. Memory lives in this page’s <code>messages[]</code>.</p>
+        <p class="hint" data-l02="12">Edit a bubble or the JSON; both sides stay in sync. Bubbles still showing ≠ the model remembers. Memory lives in <code>messages[]</code>.</p>
         <div id="log"></div>
         <p id="error" class="err" hidden></p>
         <form id="chat" class="composer">
@@ -261,10 +263,12 @@ function parseStreamChunk(sseDataLine) {
     function $(id) { return document.getElementById(id); }
     var logEl = $('log');
     var errorEl = $('error');
-    var bodyDirty = false;
-    var headerDirty = false;
-    var messagesDirty = false;
-    var thread = [];
+    var syncing = false;
+    var lastSource = 'boot';
+    var state = {
+      endpoint: '', apikey: '', model: '', stream: false, temp: '0.2',
+      system: '', maxTurns: '8', strategy: 'slide', messages: []
+    };
     var ctfCaptured = false;
     var teacherMode = /(?:^|[?&])teacher=1(?:&|$)/.test(String(location.search || ''));
 
@@ -370,9 +374,13 @@ function parseStreamChunk(sseDataLine) {
     function applyHostOpenRouterKey() {
       var key = window.__VK_OPENROUTER_KEY;
       if (typeof key !== 'string' || !key) return;
-      var el = $('apikey');
-      if (el && !String(el.value || '').trim()) el.value = key;
-      syncHeaders();
+      if (!String(state.apikey || $('apikey').value || '').trim()) {
+        state.apikey = key;
+        $('apikey').value = key;
+      } else {
+        state.apikey = $('apikey').value;
+      }
+      writeHeaders();
     }
 
     function scheduleSave() {
@@ -393,42 +401,163 @@ function parseStreamChunk(sseDataLine) {
       });
     }
 
-    function replayThread() {
+    function pullKnobs() {
+      state.endpoint = $('endpoint').value;
+      state.apikey = $('apikey').value;
+      state.model = $('model').value;
+      state.stream = $('stream').checked;
+      state.temp = $('temp').value;
+      state.system = $('system').value;
+      state.maxTurns = $('maxTurns').value;
+      state.strategy = $('strategy').value;
+    }
+
+    function isSummary(m) {
+      var c = String(m && m.content || '');
+      return c.indexOf('[summary') === 0 || c.indexOf('【摘要') === 0;
+    }
+
+    function primarySystem(list) {
+      var arr = list || state.messages;
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i].role === 'system' && !isSummary(arr[i])) return arr[i];
+      }
+      return null;
+    }
+
+    function setSystemOnMessages(text) {
+      var m = primarySystem(state.messages);
+      if (m) m.content = text;
+      else {
+        var rest = state.messages.filter(function (x) { return x.role !== 'system' || isSummary(x); });
+        state.messages = [{ role: 'system', content: text }].concat(rest);
+      }
+    }
+
+    function systemFromMessages() {
+      var m = primarySystem(state.messages);
+      if (m) state.system = m.content;
+    }
+
+    function authored() {
+      return lastSource === 'json' || lastSource === 'body';
+    }
+
+    function outgoing() {
+      if (authored()) return state.messages;
+      setSystemOnMessages(state.system);
+      return windowed(state.messages);
+    }
+
+    function commit(source, patch) {
+      if (syncing) return;
+      if (patch) {
+        Object.keys(patch).forEach(function (k) { state[k] = patch[k]; });
+      }
+      lastSource = source;
+      if (source === 'system') setSystemOnMessages(state.system);
+      if (source === 'json' || source === 'log' || source === 'body') systemFromMessages();
+      paint(source);
+    }
+
+    function replayThread(messages) {
+      var list = messages || outgoing();
       logEl.innerHTML = '';
       var hasTurns = false;
-      thread.forEach(function (m) {
-        if (m.role === 'user') { addMsg('user', m.content); hasTurns = true; }
-        else if (m.role === 'assistant') { addMsg('bot', m.content); hasTurns = true; }
+      list.forEach(function (m, i) {
+        if (m.role === 'user') { addMsg('user', m.content, i); hasTurns = true; }
+        else if (m.role === 'assistant') { addMsg('bot', m.content, i); hasTurns = true; }
       });
       if (!hasTurns) {
         addMsg('sys', 'Fill the endpoint and key, then say something. After send, read the raw response; the parser is prefilled — homework comes later.');
       }
     }
 
-    function addMsg(cls, text) {
+    function addMsg(cls, text, idx) {
       var el = document.createElement('div');
       el.className = 'msg ' + cls;
       el.textContent = text;
+      if (idx != null && (cls === 'user' || cls === 'bot')) {
+        el.contentEditable = 'true';
+        el.spellcheck = false;
+        el.setAttribute('data-idx', String(idx));
+        el.title = 'Edit this turn';
+        el.addEventListener('input', onBubbleInput);
+      }
       logEl.appendChild(el);
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    function systemText() { return $('system').value; }
+    function onBubbleInput(e) {
+      if (syncing) return;
+      var el = e.currentTarget;
+      var idx = Number(el.getAttribute('data-idx'));
+      var list = outgoing();
+      if (!list[idx]) return;
+      list[idx].content = el.textContent || '';
+      if (authored()) state.messages = list;
+      systemFromMessages();
+      paint('log');
+    }
 
-    function rebuildHistorySystem() {
-      var rest = thread.filter(function (m) { return m.role !== 'system'; });
-      thread = [{ role: 'system', content: systemText() }].concat(rest);
+    function writeJson(messages) {
+      var text = JSON.stringify(messages, null, 2);
+      if ($('messages-json').value !== text) $('messages-json').value = text;
+    }
+
+    function writeBody(messages) {
+      var text = JSON.stringify({
+        model: (state.model || '').trim() || 'qwen/qwen-2.5-7b-instruct',
+        messages: messages,
+        stream: !!state.stream,
+        temperature: Number(state.temp)
+      }, null, 2);
+      if ($('req-body').value !== text) $('req-body').value = text;
+    }
+
+    function writeHeaders() {
+      var lines = ['Content-Type: application/json'];
+      var key = String(state.apikey || '').trim();
+      if (key) lines.push('Authorization: Bearer ' + key);
+      $('req-headers').value = lines.join('\n');
+    }
+
+    function paint(source) {
+      if (syncing) return;
+      var messages = outgoing();
+      syncing = true;
+      try {
+        if (source !== 'json') writeJson(messages);
+        if (source !== 'body') writeBody(messages);
+        if (source !== 'system' && $('system').value !== state.system) $('system').value = state.system;
+        if (source !== 'log') replayThread(messages);
+        if (source !== 'model') $('model').value = state.model;
+        if (source !== 'temp') $('temp').value = state.temp;
+        if (source !== 'stream') $('stream').checked = !!state.stream;
+        if (source !== 'window') {
+          $('maxTurns').value = state.maxTurns;
+          $('strategy').value = state.strategy;
+        }
+        if (source !== 'endpoint') $('endpoint').value = state.endpoint;
+        if (source !== 'apikey') $('apikey').value = state.apikey;
+        if (source !== 'headers') writeHeaders();
+        else $('apikey').value = state.apikey;
+        refreshReadouts(messages);
+        scheduleSave();
+      } finally {
+        syncing = false;
+      }
     }
 
     function windowed(list) {
-      var maxTurns = Math.max(1, Number($('maxTurns').value) || 8);
+      var maxTurns = Math.max(1, Number(state.maxTurns) || 8);
       var keep = maxTurns * 2;
       var system = list.filter(function (m) { return m.role === 'system'; });
       var rest = list.filter(function (m) { return m.role !== 'system'; });
       if (rest.length <= keep) return system.concat(rest);
       var recent = rest.slice(-keep);
       var dropped = rest.slice(0, rest.length - keep);
-      var strategy = $('strategy').value;
+      var strategy = state.strategy;
       if (strategy === 'slide') return system.concat(recent);
       var blob = dropped.map(function (m) {
         return m.role + ': ' + String(m.content).slice(0, 40);
@@ -444,7 +573,7 @@ function parseStreamChunk(sseDataLine) {
     }
 
     function refreshReadouts(messages) {
-      $('msgcount').textContent = messages.length + '  items. Send this JSON, not the bubbles above.';
+      $('msgcount').textContent = messages.length + ' items. Same array as the bubbles. Send this JSON.';
       $('est').textContent = 'Estimate prompt ≈ ' + estimateTokens(messages) + ' (not the bill)';
     }
 
@@ -455,34 +584,15 @@ function parseStreamChunk(sseDataLine) {
     }
 
     function outgoingMessages() {
-      if (messagesDirty) return parseMessagesJson();
-      rebuildHistorySystem();
-      return windowed(thread);
+      return outgoing();
     }
 
     function syncBody() {
-      var messages;
-      try { messages = outgoingMessages(); }
-      catch (err) { return; }
-      if (!messagesDirty) $('messages-json').value = JSON.stringify(messages, null, 2);
-      if (!bodyDirty) {
-        $('req-body').value = JSON.stringify({
-          model: $('model').value.trim() || 'qwen/qwen-2.5-7b-instruct',
-          messages: messages,
-          stream: $('stream').checked,
-          temperature: Number($('temp').value)
-        }, null, 2);
-      }
-      refreshReadouts(messages);
-      scheduleSave();
+      paint('knobs');
     }
 
     function syncHeaders() {
-      if (headerDirty) return;
-      var lines = ['Content-Type: application/json'];
-      var key = $('apikey').value.trim();
-      if (key) lines.push('Authorization: Bearer ' + key);
-      $('req-headers').value = lines.join('\n');
+      writeHeaders();
     }
 
     function parseHeaderBlock(text) {
@@ -532,11 +642,9 @@ function parseStreamChunk(sseDataLine) {
       showError('');
       var content = parsed.content || '';
       if (content) {
-        thread.push({ role: 'assistant', content: content });
-        addMsg('bot', content);
-        bodyDirty = false;
-        messagesDirty = false;
-        syncBody();
+        state.messages.push({ role: 'assistant', content: content });
+        lastSource = 'send';
+        paint('send');
       }
       var u = parsed.usage || {};
       $('pt').textContent = u.prompt_tokens == null ? '—' : String(u.prompt_tokens);
@@ -586,10 +694,9 @@ function parseStreamChunk(sseDataLine) {
           var parsed = parseChunk(data);
           if (parsed && parsed.done) {
             if (acc) {
-              thread.push({ role: 'assistant', content: acc });
-              bodyDirty = false;
-              messagesDirty = false;
-              syncBody();
+              state.messages.push({ role: 'assistant', content: acc });
+              lastSource = 'send';
+              paint('send');
             }
             return raw;
           }
@@ -597,10 +704,9 @@ function parseStreamChunk(sseDataLine) {
         }
       }
       if (acc) {
-        thread.push({ role: 'assistant', content: acc });
-        bodyDirty = false;
-        messagesDirty = false;
-        syncBody();
+        state.messages.push({ role: 'assistant', content: acc });
+        lastSource = 'send';
+        paint('send');
       }
       return raw;
     }
@@ -707,45 +813,62 @@ function parseStreamChunk(sseDataLine) {
       }
     }
 
-    $('req-body').addEventListener('input', function () { bodyDirty = true; });
-    $('req-headers').addEventListener('input', function () { headerDirty = true; });
-    $('messages-json').addEventListener('input', function () {
-      messagesDirty = true;
+    $('req-body').addEventListener('input', function () {
+      if (syncing) return;
       try {
-        var arr = parseMessagesJson();
-        thread = arr;
+        var obj = JSON.parse($('req-body').value);
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+        var patch = {};
+        if (typeof obj.model === 'string') patch.model = obj.model;
+        if (typeof obj.temperature === 'number') patch.temp = String(obj.temperature);
+        if (typeof obj.stream === 'boolean') patch.stream = obj.stream;
+        if (Array.isArray(obj.messages)) patch.messages = obj.messages;
         showError('');
-        refreshReadouts(arr);
-        replayThread();
-        scheduleSave();
-        if (!bodyDirty) {
-          $('req-body').value = JSON.stringify({
-            model: $('model').value.trim() || 'qwen/qwen-2.5-7b-instruct',
-            messages: arr,
-            stream: $('stream').checked,
-            temperature: Number($('temp').value)
-          }, null, 2);
+        commit('body', patch);
+      } catch (err) { /* typing */ }
+    });
+    $('req-headers').addEventListener('input', function () {
+      if (syncing) return;
+      var headers = parseHeaderBlock($('req-headers').value);
+      var names = Object.keys(headers);
+      for (var i = 0; i < names.length; i++) {
+        if (names[i].toLowerCase() === 'authorization') {
+          var m = /^Bearer\s+(\S+)/i.exec(String(headers[names[i]] || ''));
+          if (m) commit('headers', { apikey: m[1] });
         }
+      }
+    });
+    $('messages-json').addEventListener('input', function () {
+      try {
+        showError('');
+        commit('json', { messages: parseMessagesJson() });
       } catch (err) {
         showError('messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
       }
     });
-    ['endpoint','apikey','model','system','temp','stream','maxTurns','strategy'].forEach(function (id) {
-      $('' + id).addEventListener('change', function () { syncHeaders(); syncBody(); });
-      $('' + id).addEventListener('input', function () { syncHeaders(); syncBody(); });
+    $('endpoint').addEventListener('input', function () { if (!syncing) commit('endpoint', { endpoint: $('endpoint').value }); });
+    $('apikey').addEventListener('input', function () { if (!syncing) commit('apikey', { apikey: $('apikey').value }); });
+    $('model').addEventListener('input', function () { if (!syncing) commit('model', { model: $('model').value }); });
+    $('temp').addEventListener('input', function () { if (!syncing) commit('temp', { temp: $('temp').value }); });
+    $('stream').addEventListener('change', function () { if (!syncing) commit('stream', { stream: $('stream').checked }); });
+    $('stream').addEventListener('input', function () { if (!syncing) commit('stream', { stream: $('stream').checked }); });
+    $('system').addEventListener('input', function () {
+      if (syncing) return;
+      commit('system', { system: $('system').value });
     });
-    $('reset-body').onclick = function () { bodyDirty = false; messagesDirty = false; syncBody(); };
-    $('reset-headers').onclick = function () { headerDirty = false; syncHeaders(); };
+    $('maxTurns').addEventListener('input', function () { if (!syncing) commit('window', { maxTurns: $('maxTurns').value }); });
+    $('strategy').addEventListener('input', function () { if (!syncing) commit('window', { strategy: $('strategy').value }); });
+    $('strategy').addEventListener('change', function () { if (!syncing) commit('window', { strategy: $('strategy').value }); });
+    $('reset-body').onclick = function () { lastSource = 'window'; paint('knobs'); };
+    $('reset-headers').onclick = function () { writeHeaders(); };
     $('reparse').onclick = reparseOnly;
     $('clear').onclick = function () {
-      thread = [];
-      rebuildHistorySystem();
-      logEl.innerHTML = '';
       showError('');
-      bodyDirty = false;
-      messagesDirty = false;
       resetCtfProgress();
-      syncBody();
+      state.messages = [];
+      lastSource = 'clear';
+      setSystemOnMessages(state.system);
+      paint('clear');
       addMsg('sys', 'Cleared this page’s messages[]. The model does not know you cleared it.');
     };
     $('reveal').onclick = function () {
@@ -764,7 +887,7 @@ function parseStreamChunk(sseDataLine) {
       $('chat').requestSubmit();
     });
     $('export').onclick = function () {
-      var blob = new Blob([JSON.stringify(thread, null, 2)], { type: 'application/json' });
+      var blob = new Blob([JSON.stringify(state.messages, null, 2)], { type: 'application/json' });
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = 'messages.json';
@@ -776,19 +899,16 @@ function parseStreamChunk(sseDataLine) {
       var text = $('prompt').value.trim();
       if (!text) return;
       $('prompt').value = '';
-      if (messagesDirty) {
-        try { thread = parseMessagesJson(); messagesDirty = false; }
+      if (lastSource === 'json') {
+        try { state.messages = parseMessagesJson(); }
         catch (err) {
           showError('messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
           return;
         }
       }
-      rebuildHistorySystem();
-      thread.push({ role: 'user', content: text });
-      addMsg('user', text);
-      bodyDirty = false;
-      messagesDirty = false;
-      syncBody();
+      setSystemOnMessages(state.system);
+      state.messages.push({ role: 'user', content: text });
+      paint('send');
       sendNow();
     });
 
@@ -852,10 +972,11 @@ function parseStreamChunk(sseDataLine) {
     $('split').addEventListener('pointercancel', function () { railDrag = false; });
 
     function bootDefaults() {
-      rebuildHistorySystem();
-      syncHeaders();
-      syncBody();
-      addMsg('sys', 'Fill the endpoint and key, then say something. After send, read the raw response; the parser is prefilled — homework comes later.');
+      pullKnobs();
+      state.messages = [];
+      lastSource = 'boot';
+      setSystemOnMessages(state.system);
+      paint('boot');
     }
 
     $('save-now').onclick = function () {
@@ -871,20 +992,16 @@ function parseStreamChunk(sseDataLine) {
       var data = null;
       try { data = raw ? JSON.parse(raw) : null; } catch (err) { data = null; }
       if (data && applySnapshot(data)) {
+        pullKnobs();
         try {
-          thread = parseMessagesJson();
-          messagesDirty = true;
+          state.messages = parseMessagesJson();
         } catch (err) {
-          thread = [];
-          messagesDirty = false;
+          state.messages = [];
         }
-        rebuildHistorySystem();
-        messagesDirty = false;
-        headerDirty = false;
-        bodyDirty = false;
-        syncHeaders();
-        syncBody();
-        replayThread();
+        systemFromMessages();
+        if (!state.system) setSystemOnMessages($('system').value);
+        lastSource = 'restore';
+        paint('restore');
         setSaveStatus('Saved');
       }
       applyHostOpenRouterKey();
