@@ -108,7 +108,7 @@
             <div class="var" data-l02="11"><label>temperature</label><input id="temp" type="number" min="0" max="2" step="0.1" value="0.2" /></div>
           </div>
         </details>
-        <details>
+        <details open>
           <summary>对话</summary>
           <div class="drop">
             <div class="var tall" data-l02="2"><label>messages[]</label>
@@ -716,6 +716,7 @@ function parseStreamChunk(sseDataLine) {
         thread = arr;
         showError('');
         refreshReadouts(arr);
+        replayThread();
         scheduleSave();
         if (!bodyDirty) {
           $('req-body').value = JSON.stringify({
