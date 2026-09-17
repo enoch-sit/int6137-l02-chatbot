@@ -83,7 +83,7 @@
     #json-fs-bar { display:flex; align-items:center; gap:8px; }
     #json-fs-bar .ttl { font-weight:700; color:var(--eucalyptus); flex:1; }
     #json-fs-mount { flex:1; min-height:0; display:flex; }
-    #json-fs.open #messages-json { flex:1; min-height:0; height:auto; }
+    #json-fs.open #messages-json, #json-fs.open #clipboard { flex:1; min-height:0; height:auto; }
   </style>
 </head>
 <body>
@@ -119,25 +119,30 @@
               <span class="fs-host" id="json-home">
                 <textarea class="pane" id="messages-json" spellcheck="false"></textarea>
                 <span class="fs-tools">
-                  <span class="hint" id="msgcount">0 items. Same array as the bubbles. Send this JSON.</span>
+                  <span class="hint" id="msgcount">0 items. This JSON is the POST.</span>
                   <button type="button" class="alt tiny" id="json-fs-open">Full screen</button>
                 </span>
               </span>
             </div>
             <div class="var tall" data-l02="3"><label>Three roles</label><textarea id="system" rows="2">You are a classroom TA. Keep answers short.</textarea></div>
-            <div class="var tall"><label>clipboard</label>
+            <div class="var tall"><label>state</label>
               <span class="inject-row">
                 <select id="inject-into">
                   <option value="off">Off (page only)</option>
                   <option value="system" selected>Inject into system</option>
                   <option value="user">Inject into latest user</option>
                 </select>
-                <textarea class="pane" id="clipboard" rows="3" spellcheck="false">{
-  "stage": "ask_name",
-  "name": null,
-  "topic": null
-}</textarea>
-                <p class="hint" id="inject-hint">assistant is the model’s last words — do not inject there. Request body is this POST; bubbles stay the conversation.</p>
+                <span class="fs-host" id="clip-home">
+                  <textarea class="pane" id="clipboard" rows="3" spellcheck="false">stage: ask_name
+name:
+topic:</textarea>
+                  <span class="fs-tools">
+                    <button type="button" class="alt tiny" id="clip-fs-open">Full screen</button>
+                    <button type="button" class="alt tiny" id="extract">Extract</button>
+                  </span>
+                </span>
+                <p class="hint">Plain text is enough; JSON is optional. Extract is a second POST: fill this card from the transcript, do not add a bubble.</p>
+                <p class="hint" id="inject-hint">This POST appends state to system. See it in messages[] JSON. The three-roles box stays the stable rules.</p>
               </span>
             </div>
             <div class="var" data-l02="7"><label>Window</label>
@@ -463,23 +468,22 @@ function parseStreamChunk(sseDataLine) {
     }
 
     function authored() {
-      return lastSource === 'json' || lastSource === 'body';
+      return lastSource === 'json' || lastSource === 'body' || lastSource === 'log';
     }
 
     function outgoing() {
-      if (authored()) return state.messages;
-      setSystemOnMessages(state.system);
-      return windowed(state.messages);
+      if (lastSource === 'window') return windowed(state.messages);
+      return state.messages;
     }
 
     function stripClip(text) {
-      return String(text || '').replace(/(?:\n)?<clipboard>[\s\S]*?<\/clipboard>/g, '').replace(/\s+$/, '');
+      return String(text || '').replace(/(?:\n)?<state>[\s\S]*?<\/state>/g, '').replace(/\s+$/, '');
     }
 
     function clipBlock() {
       var raw = String(state.clipboard || '').trim();
       if (!raw) return '';
-      return '<clipboard>\n' + raw + '\n</clipboard>';
+      return '<state>\n' + raw + '\n</state>';
     }
 
     function withClip(text) {
@@ -505,17 +509,17 @@ function parseStreamChunk(sseDataLine) {
       var en = document.documentElement.lang === 'en';
       if (where === 'off') {
         return en
-          ? 'Off: clipboard stays on this page. This POST omits it — the model is blind.'
-          : '关闭：clipboard 只留在本页。这一发不带它，模型看不见。';
+          ? 'Off: state stays on this page. This POST omits it — the model is blind.'
+          : '关闭：状态只留在本页。这一发不带它，模型看不见。';
       }
       if (where === 'user') {
         return en
-          ? 'This POST appends clipboard to the latest user. assistant is the model last words — do not inject there.'
-          : '这一发把 clipboard 接到最新 user。不要注入 assistant：那是模型上一轮说过的话。';
+          ? 'This POST appends state to the latest user. See it in messages[] JSON.'
+          : '这一发把状态接到最新 user。请看 messages[] JSON。';
       }
       return en
-        ? 'This POST appends clipboard to system. The three-roles box stays the stable rules.'
-        : '这一发把 clipboard 接到 system。三角色仍是稳定规则。';
+        ? 'This POST appends state to system. See it in messages[] JSON. The three-roles box stays the stable rules.'
+        : '这一发把状态接到 system。请看 messages[] JSON。三角色仍是稳定规则。';
     }
 
     function wiredMessages() {
@@ -580,6 +584,7 @@ function parseStreamChunk(sseDataLine) {
         el.setAttribute('data-idx', String(idx));
         el.title = 'Edit this turn';
         el.addEventListener('input', onBubbleInput);
+        el.addEventListener('blur', onBubbleBlur);
       }
       logEl.appendChild(el);
       logEl.scrollTop = logEl.scrollHeight;
@@ -591,10 +596,15 @@ function parseStreamChunk(sseDataLine) {
       var idx = Number(el.getAttribute('data-idx'));
       var list = outgoing();
       if (!list[idx]) return;
-      list[idx].content = el.textContent || '';
-      if (authored()) state.messages = list;
+      list[idx].content = stripClip(el.textContent || '');
+      lastSource = 'log';
       systemFromMessages();
       paint('log');
+    }
+
+    function onBubbleBlur() {
+      if (syncing) return;
+      paint('log-blur');
     }
 
     function writeJson(messages) {
@@ -625,8 +635,8 @@ function parseStreamChunk(sseDataLine) {
       var wired = wiredMessages();
       syncing = true;
       try {
-        if (source !== 'json') writeJson(messages);
-        if (source !== 'body') writeBody(wired);
+        if (source !== 'json' || document.activeElement !== $('messages-json')) writeJson(wired);
+        if (source !== 'body' && source !== 'extract') writeBody(wired);
         if (source !== 'system' && $('system').value !== state.system) $('system').value = state.system;
         if (source !== 'log') replayThread(messages);
         if (source !== 'model') $('model').value = state.model;
@@ -678,13 +688,13 @@ function parseStreamChunk(sseDataLine) {
       var en = document.documentElement.lang === 'en';
       var where = state.injectInto || 'off';
       var extra = (where === 'off' || !clipBlock())
-        ? (en ? ' Request body = this JSON.' : ' 请求体=这块 JSON。')
+        ? (en ? ' This JSON is the POST.' : ' 这块 JSON 就是这一发。')
         : (where === 'system'
-          ? (en ? ' Request body injects clipboard into system.' : ' 请求体把 clipboard 注入 system。')
-          : (en ? ' Request body injects clipboard into latest user.' : ' 请求体把 clipboard 注入最新 user。'));
+          ? (en ? ' This JSON is the POST; <state> is on system.' : ' 这块 JSON 就是这一发；<state> 在 system。')
+          : (en ? ' This JSON is the POST; <state> is on the latest user.' : ' 这块 JSON 就是这一发；<state> 在最新 user。'));
       $('msgcount').textContent = en
-        ? (messages.length + ' items. Same array as the bubbles.' + extra)
-        : (messages.length + ' 条。与气泡同步。' + extra);
+        ? (wired.length + ' items. Bubbles hide the <state> block.' + extra)
+        : (wired.length + ' 条。气泡不显示 <state>。' + extra);
       $('est').textContent = en
         ? ('Estimate prompt ≈ ' + estimateTokens(wired || messages) + ' (not the bill)')
         : ('估算 prompt ≈ ' + estimateTokens(wired || messages) + '（不是账单）');
@@ -699,6 +709,110 @@ function parseStreamChunk(sseDataLine) {
 
     function outgoingMessages() {
       return wiredMessages();
+    }
+
+    function extractShape() {
+      var raw = stripClip(String(state.clipboard || '')).trim();
+      return raw || 'stage:\nname:\ntopic:';
+    }
+
+    function transcriptText() {
+      return (state.messages || []).map(function (m) {
+        return m.role + ': ' + stripClip(m.content);
+      }).join('\n');
+    }
+
+    function extractMessages() {
+      var en = document.documentElement.lang === 'en';
+      var shape = extractShape();
+      var sys = en
+        ? 'You only extract. Do not chat. Rewrite the whole card. Keep this structure. Empty slots stay empty. Last correction wins. Do not invent. Output the card body only.'
+        : '你只做抽取。不要聊天。按这个结构把整张卡片重写。没出现的槽位留空。更正以最后一次为准。不要编造。只输出卡片正文。';
+      var talk = transcriptText() || (en ? '(empty)' : '（空）');
+      var user = (en ? 'Current card:\n' : '当前卡片：\n') + shape + '\n\n' + (en ? 'Transcript:\n' : '对话记录：\n') + talk;
+      return [
+        { role: 'system', content: sys + '\n\n' + shape },
+        { role: 'user', content: user }
+      ];
+    }
+
+    function setBusy(on) {
+      $('send').disabled = !!on;
+      if ($('extract')) $('extract').disabled = !!on;
+    }
+
+    function applyExtracted(parsed, status) {
+      var en = document.documentElement.lang === 'en';
+      $('httpstatus').textContent = (en ? 'Extract HTTP ' : '抽取 HTTP ') + status;
+      if (!parsed) { showError(en ? 'Parser returned nothing' : '解析器没有返回对象'); return; }
+      if (parsed.error) { showError(parsed.error); return; }
+      var text = stripClip(String(parsed.content || '')).trim();
+      if (!text) { showError(en ? 'Extract returned an empty card' : '抽取结果是空的'); return; }
+      showError('');
+      state.clipboard = text;
+      lastSource = 'clipboard';
+      paint('extract');
+      addMsg('sys', en
+        ? 'Extract finished. The card changed. This was a second POST — no new chat bubble.'
+        : '抽取完成。卡片已更新。这是另一次 POST，对话没有新气泡。');
+    }
+
+    async function extractNow() {
+      var en = document.documentElement.lang === 'en';
+      showError('');
+      var hasTalk = (state.messages || []).some(function (m) {
+        return m.role === 'user' || m.role === 'assistant';
+      });
+      if (!hasTalk) {
+        showError(en ? 'Chat first. Extract reads the transcript, not the bubbles.' : '先聊几句再抽取。抽取读的是对话记录，不是气泡。');
+        $('httpstatus').textContent = en ? 'Not sent' : '未发送';
+        return;
+      }
+      var endpoint = $('endpoint').value.trim();
+      if (!endpoint) {
+        showError(en ? 'Fill the API endpoint first.' : '先填 API 端点（例如 OpenRouter chat completions）。');
+        $('httpstatus').textContent = en ? 'Not sent' : '未发送';
+        return;
+      }
+      var messages = extractMessages();
+      var parsers;
+      try { parsers = loadParsers(); }
+      catch (err) {
+        showError((en ? 'Parser failed to load: ' : '解析器无法加载：') + (err && err.message ? err.message : err));
+        return;
+      }
+      if (!parsers.parseResponse) {
+        showError(en ? 'Parser needs function parseResponse(rawText, httpStatus)' : '解析器需要 function parseResponse(rawText, httpStatus)');
+        return;
+      }
+      var headers = ensureFetchAuth(parseHeaderBlock($('req-headers').value));
+      var bodyObj = {
+        model: $('model').value.trim() || 'qwen/qwen-2.5-7b-instruct',
+        messages: messages,
+        stream: false,
+        temperature: 0
+      };
+      var bodyText = JSON.stringify(bodyObj);
+      $('req-body').value = JSON.stringify(bodyObj, null, 2);
+      setBusy(true);
+      try {
+        var res = await fetch(endpoint, { method: 'POST', headers: headers, body: bodyText });
+        $('res-headers').value = dumpResponseHeaders(res);
+        $('httpstatus').textContent = (en ? 'Extract HTTP ' : '抽取 HTTP ') + res.status;
+        var raw = await res.text();
+        $('res-body').value = raw;
+        var parsed = parsers.parseResponse(raw, res.status);
+        applyExtracted(parsed, res.status);
+      } catch (err) {
+        var msg = String(err && err.message ? err.message : err);
+        if (/Failed to fetch|NetworkError|CORS/i.test(msg)) {
+          msg = (en ? 'Network/CORS failed: ' : '网络/CORS 失败：') + msg + (en ? '. The endpoint must allow browser CORS, or use the course proxy.' : '。端点必须允许浏览器跨域，或改用课程 proxy。');
+        }
+        showError(msg);
+        $('httpstatus').textContent = en ? 'Request failed' : '请求失败';
+      } finally {
+        setBusy(false);
+      }
     }
 
     function syncBody() {
@@ -867,8 +981,7 @@ function parseStreamChunk(sseDataLine) {
         });
         $('req-body').value = JSON.stringify(JSON.parse(bodyText), null, 2);
       }
-      var sendBtn = $('send');
-      sendBtn.disabled = true;
+      setBusy(true);
       try {
         var res = await fetch(endpoint, { method: 'POST', headers: headers, body: bodyText });
         $('res-headers').value = dumpResponseHeaders(res);
@@ -893,7 +1006,7 @@ function parseStreamChunk(sseDataLine) {
         showError(msg);
         $('httpstatus').textContent = 'Request failed';
       } finally {
-        sendBtn.disabled = false;
+        setBusy(false);
       }
     }
 
@@ -960,6 +1073,10 @@ function parseStreamChunk(sseDataLine) {
         showError('messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
       }
     });
+    $('messages-json').addEventListener('blur', function () {
+      if (syncing) return;
+      paint('json-blur');
+    });
     $('endpoint').addEventListener('input', function () { if (!syncing) commit('endpoint', { endpoint: $('endpoint').value }); });
     $('apikey').addEventListener('input', function () { if (!syncing) commit('apikey', { apikey: $('apikey').value }); });
     $('model').addEventListener('input', function () { if (!syncing) commit('model', { model: $('model').value }); });
@@ -975,6 +1092,7 @@ function parseStreamChunk(sseDataLine) {
     $('strategy').addEventListener('change', function () { if (!syncing) commit('window', { strategy: $('strategy').value }); });
     $('clipboard').addEventListener('input', function () { if (!syncing) commit('clipboard', { clipboard: $('clipboard').value }); });
     $('inject-into').addEventListener('change', function () { if (!syncing) commit('clipboard', { injectInto: $('inject-into').value }); });
+    $('extract').onclick = function () { extractNow(); };
     $('reset-body').onclick = function () { lastSource = 'window'; paint('knobs'); };
     $('reset-headers').onclick = function () { writeHeaders(); };
     $('reparse').onclick = reparseOnly;
@@ -1016,24 +1134,29 @@ function parseStreamChunk(sseDataLine) {
       if (!text) return;
       $('prompt').value = '';
       if (lastSource === 'json') {
-        try { state.messages = parseMessagesJson(); }
+        try { state.messages = stripMessages(parseMessagesJson()); }
         catch (err) {
           showError('messages[] JSON is invalid: ' + (err && err.message ? err.message : err));
           return;
         }
       }
-      setSystemOnMessages(state.system);
       state.messages.push({ role: 'user', content: text });
+      lastSource = 'send';
       paint('send');
       sendNow();
     });
 
     var jsonHome = $('json-home');
+    var clipHome = $('clip-home');
     var jsonFs = $('json-fs');
     var jsonMount = $('json-fs-mount');
-    function jsonFsOpen() {
-      var box = $('messages-json');
+    var jsonFsTitle = jsonFs.querySelector('.ttl');
+    var fsHome = null;
+    function paneFsOpen(home, box, title) {
+      if (jsonFs.classList.contains('open')) paneFsClose();
       var sel = { start: box.selectionStart, end: box.selectionEnd };
+      fsHome = home;
+      if (jsonFsTitle) jsonFsTitle.textContent = title;
       jsonMount.appendChild(box);
       jsonFs.hidden = false;
       jsonFs.classList.add('open');
@@ -1042,24 +1165,29 @@ function parseStreamChunk(sseDataLine) {
       box.selectionStart = sel.start;
       box.selectionEnd = sel.end;
     }
-    function jsonFsClose() {
-      if (!jsonFs.classList.contains('open')) return;
-      var box = $('messages-json');
+    function paneFsClose() {
+      if (!jsonFs.classList.contains('open') || !fsHome) return;
+      var box = jsonMount.querySelector('textarea');
+      if (!box) return;
       var sel = { start: box.selectionStart, end: box.selectionEnd };
-      jsonHome.insertBefore(box, jsonHome.firstChild);
+      fsHome.insertBefore(box, fsHome.firstChild);
       jsonFs.classList.remove('open');
       jsonFs.hidden = true;
       document.body.style.overflow = '';
       box.selectionStart = sel.start;
       box.selectionEnd = sel.end;
+      fsHome = null;
     }
-    $('json-fs-open').onclick = jsonFsOpen;
-    $('json-fs-close').onclick = jsonFsClose;
+    $('json-fs-open').onclick = function () { paneFsOpen(jsonHome, $('messages-json'), 'messages[]'); };
+    $('clip-fs-open').onclick = function () {
+      paneFsOpen(clipHome, $('clipboard'), document.documentElement.lang === 'en' ? 'state' : '状态');
+    };
+    $('json-fs-close').onclick = paneFsClose;
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
       if (!jsonFs.classList.contains('open')) return;
       e.preventDefault();
-      jsonFsClose();
+      paneFsClose();
     });
 
     var RAIL_MIN = 220;
@@ -1110,7 +1238,7 @@ function parseStreamChunk(sseDataLine) {
       if (data && applySnapshot(data)) {
         pullKnobs();
         try {
-          state.messages = parseMessagesJson();
+          state.messages = stripMessages(parseMessagesJson());
         } catch (err) {
           state.messages = [];
         }

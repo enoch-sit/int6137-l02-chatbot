@@ -2,7 +2,7 @@
 
 Standalone HTML for week 2 lab. Students paste their own endpoint and key. No keys in this repo.
 
-Clipboard (workflow state) injects into `system` or the latest `user` on this POST — never `assistant`. Off leaves the model blind.
+Clipboard (workflow state) injects into `system` or the latest `user` on this POST — never `assistant`. Off leaves the model blind. Extract is a second structured POST: it fills the state card from the transcript and does not rewrite chat bubbles.
 
 ## Site
 
