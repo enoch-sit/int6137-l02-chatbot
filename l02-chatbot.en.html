@@ -44,6 +44,8 @@
     }
     textarea.pane { min-height:72px; font-family: ui-monospace, Consolas, monospace; font-size:11px; background:var(--white); }
     #messages-json { min-height:120px; }
+    #clipboard { min-height:64px; font-family: ui-monospace, Consolas, monospace; font-size:11px; }
+    .inject-row { display:flex; flex-direction:column; gap:6px; min-width:0; }
     #parser { min-height:140px; font-family: ui-monospace, Consolas, monospace; font-size:11px; background:var(--white); }
     #log { flex:1; min-height:320px; overflow:auto; border-radius:10px; padding:8px; background:var(--cream); }
     .msg { margin:0 0 6px; padding:8px 10px; border-radius:10px; white-space:pre-wrap; font-size:13px; }
@@ -123,6 +125,21 @@
               </span>
             </div>
             <div class="var tall" data-l02="3"><label>Three roles</label><textarea id="system" rows="2">You are a classroom TA. Keep answers short.</textarea></div>
+            <div class="var tall"><label>clipboard</label>
+              <span class="inject-row">
+                <select id="inject-into">
+                  <option value="off">Off (page only)</option>
+                  <option value="system" selected>Inject into system</option>
+                  <option value="user">Inject into latest user</option>
+                </select>
+                <textarea class="pane" id="clipboard" rows="3" spellcheck="false">{
+  "stage": "ask_name",
+  "name": null,
+  "topic": null
+}</textarea>
+                <p class="hint" id="inject-hint">assistant is the model’s last words — do not inject there. Request body is this POST; bubbles stay the conversation.</p>
+              </span>
+            </div>
             <div class="var" data-l02="7"><label>Window</label>
               <span><input id="maxTurns" type="number" min="1" max="40" value="8" style="width:4.5rem" /> turns · 
               <select id="strategy"><option value="slide">Slide</option><option value="summary">Summary placeholder</option><option value="hybrid">Hybrid placeholder</option></select></span>
@@ -267,7 +284,8 @@ function parseStreamChunk(sseDataLine) {
     var lastSource = 'boot';
     var state = {
       endpoint: '', apikey: '', model: '', stream: false, temp: '0.2',
-      system: '', maxTurns: '8', strategy: 'slide', messages: []
+      system: '', maxTurns: '8', strategy: 'slide', messages: [],
+      clipboard: '', injectInto: 'system'
     };
     var ctfCaptured = false;
     var teacherMode = /(?:^|[?&])teacher=1(?:&|$)/.test(String(location.search || ''));
@@ -275,7 +293,7 @@ function parseStreamChunk(sseDataLine) {
     var persistReady = false;
     var saveTimer = null;
     var SAVE_KEY = 'l02-vars';
-    var SAVE_IDS = ['endpoint', 'apikey', 'model', 'temp', 'system', 'maxTurns', 'strategy', 'messages-json'];
+    var SAVE_IDS = ['endpoint', 'apikey', 'model', 'temp', 'system', 'maxTurns', 'strategy', 'messages-json', 'clipboard'];
     var pageEl = document.querySelector('.page');
     var shellEl = document.querySelector('.shell');
 
@@ -355,6 +373,8 @@ function parseStreamChunk(sseDataLine) {
         system: $('system').value,
         maxTurns: $('maxTurns').value,
         strategy: $('strategy').value,
+        clipboard: $('clipboard').value,
+        injectInto: $('inject-into').value,
         messages: $('messages-json').value,
         rail: rail || '320px'
       };
@@ -367,6 +387,7 @@ function parseStreamChunk(sseDataLine) {
         if (typeof data[key] === 'string' && $(id)) $(id).value = data[key];
       });
       if (typeof data.stream === 'boolean') $('stream').checked = data.stream;
+      if (typeof data.injectInto === 'string' && $('inject-into')) $('inject-into').value = data.injectInto;
       if (data.rail) applyRail(parseInt(data.rail, 10));
       return true;
     }
@@ -410,6 +431,8 @@ function parseStreamChunk(sseDataLine) {
       state.system = $('system').value;
       state.maxTurns = $('maxTurns').value;
       state.strategy = $('strategy').value;
+      state.clipboard = $('clipboard').value;
+      state.injectInto = $('inject-into').value;
     }
 
     function isSummary(m) {
@@ -449,9 +472,83 @@ function parseStreamChunk(sseDataLine) {
       return windowed(state.messages);
     }
 
+    function stripClip(text) {
+      return String(text || '').replace(/(?:\n)?<clipboard>[\s\S]*?<\/clipboard>/g, '').replace(/\s+$/, '');
+    }
+
+    function clipBlock() {
+      var raw = String(state.clipboard || '').trim();
+      if (!raw) return '';
+      return '<clipboard>\n' + raw + '\n</clipboard>';
+    }
+
+    function withClip(text) {
+      var base = stripClip(text);
+      var block = clipBlock();
+      if (!block) return base;
+      return base ? (base + '\n' + block) : block;
+    }
+
+    function stripMessages(list) {
+      return (list || []).map(function (m) {
+        return { role: m.role, content: stripClip(m.content) };
+      });
+    }
+
+    function cloneMessages(list) {
+      return (list || []).map(function (m) {
+        return { role: m.role, content: m.content };
+      });
+    }
+
+    function injectHintText(where) {
+      var en = document.documentElement.lang === 'en';
+      if (where === 'off') {
+        return en
+          ? 'Off: clipboard stays on this page. This POST omits it — the model is blind.'
+          : '关闭：clipboard 只留在本页。这一发不带它，模型看不见。';
+      }
+      if (where === 'user') {
+        return en
+          ? 'This POST appends clipboard to the latest user. assistant is the model last words — do not inject there.'
+          : '这一发把 clipboard 接到最新 user。不要注入 assistant：那是模型上一轮说过的话。';
+      }
+      return en
+        ? 'This POST appends clipboard to system. The three-roles box stays the stable rules.'
+        : '这一发把 clipboard 接到 system。三角色仍是稳定规则。';
+    }
+
+    function wiredMessages() {
+      var list = cloneMessages(outgoing());
+      var where = state.injectInto || 'off';
+      if (where === 'off' || !clipBlock()) return list;
+      if (where === 'system') {
+        var hit = false;
+        for (var i = 0; i < list.length; i++) {
+          if (list[i].role === 'system' && !isSummary(list[i])) {
+            list[i].content = withClip(list[i].content);
+            hit = true;
+            break;
+          }
+        }
+        if (!hit) list.unshift({ role: 'system', content: withClip('') });
+        return list;
+      }
+      if (where === 'user') {
+        for (var j = list.length - 1; j >= 0; j--) {
+          if (list[j].role === 'user') {
+            list[j].content = withClip(list[j].content);
+            break;
+          }
+        }
+      }
+      return list;
+    }
+
     function commit(source, patch) {
       if (syncing) return;
       if (patch) {
+        if (Array.isArray(patch.messages)) patch.messages = stripMessages(patch.messages);
         Object.keys(patch).forEach(function (k) { state[k] = patch[k]; });
       }
       lastSource = source;
@@ -525,10 +622,11 @@ function parseStreamChunk(sseDataLine) {
     function paint(source) {
       if (syncing) return;
       var messages = outgoing();
+      var wired = wiredMessages();
       syncing = true;
       try {
         if (source !== 'json') writeJson(messages);
-        if (source !== 'body') writeBody(messages);
+        if (source !== 'body') writeBody(wired);
         if (source !== 'system' && $('system').value !== state.system) $('system').value = state.system;
         if (source !== 'log') replayThread(messages);
         if (source !== 'model') $('model').value = state.model;
@@ -540,9 +638,13 @@ function parseStreamChunk(sseDataLine) {
         }
         if (source !== 'endpoint') $('endpoint').value = state.endpoint;
         if (source !== 'apikey') $('apikey').value = state.apikey;
+        if (source !== 'clipboard') {
+          if ($('clipboard').value !== state.clipboard) $('clipboard').value = state.clipboard;
+          if ($('inject-into').value !== state.injectInto) $('inject-into').value = state.injectInto;
+        }
         if (source !== 'headers') writeHeaders();
         else $('apikey').value = state.apikey;
-        refreshReadouts(messages);
+        refreshReadouts(messages, wired);
         scheduleSave();
       } finally {
         syncing = false;
@@ -572,9 +674,21 @@ function parseStreamChunk(sseDataLine) {
       return Math.ceil((s.length - cjk) / 4 + cjk / 1.5);
     }
 
-    function refreshReadouts(messages) {
-      $('msgcount').textContent = messages.length + ' items. Same array as the bubbles. Send this JSON.';
-      $('est').textContent = 'Estimate prompt ≈ ' + estimateTokens(messages) + ' (not the bill)';
+    function refreshReadouts(messages, wired) {
+      var en = document.documentElement.lang === 'en';
+      var where = state.injectInto || 'off';
+      var extra = (where === 'off' || !clipBlock())
+        ? (en ? ' Request body = this JSON.' : ' 请求体=这块 JSON。')
+        : (where === 'system'
+          ? (en ? ' Request body injects clipboard into system.' : ' 请求体把 clipboard 注入 system。')
+          : (en ? ' Request body injects clipboard into latest user.' : ' 请求体把 clipboard 注入最新 user。'));
+      $('msgcount').textContent = en
+        ? (messages.length + ' items. Same array as the bubbles.' + extra)
+        : (messages.length + ' 条。与气泡同步。' + extra);
+      $('est').textContent = en
+        ? ('Estimate prompt ≈ ' + estimateTokens(wired || messages) + ' (not the bill)')
+        : ('估算 prompt ≈ ' + estimateTokens(wired || messages) + '（不是账单）');
+      if ($('inject-hint')) $('inject-hint').textContent = injectHintText(where);
     }
 
     function parseMessagesJson() {
@@ -584,7 +698,7 @@ function parseStreamChunk(sseDataLine) {
     }
 
     function outgoingMessages() {
-      return outgoing();
+      return wiredMessages();
     }
 
     function syncBody() {
@@ -859,6 +973,8 @@ function parseStreamChunk(sseDataLine) {
     $('maxTurns').addEventListener('input', function () { if (!syncing) commit('window', { maxTurns: $('maxTurns').value }); });
     $('strategy').addEventListener('input', function () { if (!syncing) commit('window', { strategy: $('strategy').value }); });
     $('strategy').addEventListener('change', function () { if (!syncing) commit('window', { strategy: $('strategy').value }); });
+    $('clipboard').addEventListener('input', function () { if (!syncing) commit('clipboard', { clipboard: $('clipboard').value }); });
+    $('inject-into').addEventListener('change', function () { if (!syncing) commit('clipboard', { injectInto: $('inject-into').value }); });
     $('reset-body').onclick = function () { lastSource = 'window'; paint('knobs'); };
     $('reset-headers').onclick = function () { writeHeaders(); };
     $('reparse').onclick = reparseOnly;
